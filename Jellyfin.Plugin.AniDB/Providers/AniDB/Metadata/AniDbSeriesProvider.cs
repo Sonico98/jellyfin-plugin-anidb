@@ -11,6 +11,7 @@ using System.Xml;
 using System.Xml.Linq;
 using System.Xml.Serialization;
 using System.Net.Http;
+using Jellyfin.Data.Enums;
 using Jellyfin.Plugin.AniDB.Configuration;
 using Jellyfin.Plugin.AniDB.Providers.AniDB.Identity;
 using MediaBrowser.Common.Configuration;
@@ -36,11 +37,11 @@ namespace Jellyfin.Plugin.AniDB.Providers.AniDB.Metadata
         private static readonly Regex _errorRegex = new(@"<error code=""[0-9]+"">[a-zA-Z]+</error>", RegexOptions.Compiled);
         private readonly IApplicationPaths _appPaths;
 
-        private readonly Dictionary<string, string> _typeMappings = new Dictionary<string, string>
+        private readonly Dictionary<string, PersonKind> _typeMappings = new()
         {
-            {"Direction", PersonType.Director},
-            {"Music", PersonType.Composer},
-            {"Chief Animation Direction", PersonType.Director}
+            {"Direction", PersonKind.Director},
+            {"Music", PersonKind.Composer},
+            {"Chief Animation Direction", PersonKind.Director}
         };
 
         public AniDbSeriesProvider(IApplicationPaths appPaths)
@@ -366,9 +367,9 @@ namespace Jellyfin.Plugin.AniDB.Providers.AniDB.Metadata
             {
                 if (reader.NodeType == XmlNodeType.Element && reader.Name == "tag")
                 {
-                    if (!int.TryParse(reader.GetAttribute("weight"), out int weight) || weight < 400)
+                    if (!int.TryParse(reader.GetAttribute("weight"), out int weight))
                     {
-                        continue;
+                        weight = 0;
                     }
 
                     if (int.TryParse(reader.GetAttribute("id"), out int id) && IgnoredTagIds.Contains(id))
@@ -389,7 +390,14 @@ namespace Jellyfin.Plugin.AniDB.Providers.AniDB.Metadata
                             if (tagSubtree.NodeType == XmlNodeType.Element && tagSubtree.Name == "name")
                             {
                                 var name = await tagSubtree.ReadElementContentAsStringAsync().ConfigureAwait(false);
-                                genres.Add(new GenreInfo { Name = name, Weight = weight });
+                                if (name == "18 restricted")
+                                {
+                                    series.OfficialRating = "XXX";
+                                }
+                                if (weight >= 400)
+                                {
+                                    genres.Add(new GenreInfo { Name = name, Weight = weight });
+                                }
                             }
                         }
                     }
@@ -554,15 +562,15 @@ namespace Jellyfin.Plugin.AniDB.Providers.AniDB.Metadata
         {
             // todo find nationality of person and conditionally reverse name order
 
-            if (!_typeMappings.TryGetValue(type, out string mappedType))
+            if (!Enum.TryParse(type, out PersonKind personKind))
             {
-                mappedType = type;
+                personKind = _typeMappings.GetValueOrDefault(type, PersonKind.Actor);
             }
 
             return new PersonInfo
             {
                 Name = ReverseNameOrder(name),
-                Type = mappedType,
+                Type = personKind,
                 Role = role
             };
         }
